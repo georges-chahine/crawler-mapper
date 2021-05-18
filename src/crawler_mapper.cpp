@@ -930,9 +930,9 @@ protected:
         {
 
 
-            listener1.waitForTransform("odom_raw", "base_link", ros::Time(0), ros::Duration(1.0) );
+            listener1.waitForTransform("odom_ekf", "base_link", ros::Time(0), ros::Duration(1.0) );
 
-            listener1.lookupTransform("odom_raw", "base_link", ros::Time(0), zeroTf);
+            listener1.lookupTransform("odom_ekf", "base_link", ros::Time(0), zeroTf);
 
             tf::Quaternion q=zeroTf.getRotation();
             tf::Vector3 t=zeroTf.getOrigin();
@@ -971,7 +971,7 @@ protected:
         broadcaster.sendTransform(
                     tf::StampedTransform(
                         tf::Transform(qCam1, tf::Vector3(tempMat(0,3),tempMat(1,3),tempMat(2,3) )),
-                        time,"odom_raw", "map"));
+                        time,"odom_ekf", "map"));
     }
     void mapCb(const sensor_msgs::ImuConstPtr& imu, const nav_msgs::OdometryConstPtr& odom, const sensor_msgs::PointCloud2ConstPtr& ifm)
     {
@@ -1298,7 +1298,7 @@ public:
         n.param("transport",transport,transport);
 
         imu_sub.subscribe(n, "/imu/imu", 1);
-        odom_sub.subscribe(n, "/odom_raw", 1);
+        odom_sub.subscribe(n, "/odom_ekf", 1);
         pc_sub.subscribe(n, "/ifm3d_filter/cloud_out", 1);
 
         localOutlierPub = n.advertise<pcl::PointCloud<pcl::PointXYZI> > ("local_outlier_map", 1);
