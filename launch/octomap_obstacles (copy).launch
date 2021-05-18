@@ -1,0 +1,4 @@
+<launch>
+    <node pkg="crawler_mapper" type="crawler_mapper" name="crawler_mapper" launch-prefix="xterm -e gdb --args" output="screen"> </node>
+
+</launch>

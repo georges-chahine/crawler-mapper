@@ -1,0 +1,9 @@
+<launch>
+    <node type="rviz" name="rviz" pkg="rviz" args="-d $(find crawler_mapper)/rviz/crawler_demo_sweep.rviz" />
+    <node pkg="crawler_mapper" type="crawler_mapper" name="crawler_mapper"> </node>
+    <node pkg="octomap_server" type="octomap_server_node" name="octomap_server">
+        <param name="resolution" value="0.02" />        <!-- fixed map frame (set to 'map' if SLAM or localization running!) -->
+        <param name="frame_id" type="string" value="ifm2" />        <!-- maximum range to integrate (speedup!) -->
+        <param name="sensor_model/max_range" value="50.0" />        <!-- data source to integrate (PointCloud2) -->
+        <remap from="cloud_in" to="/world_map" />    </node>
+</launch>
