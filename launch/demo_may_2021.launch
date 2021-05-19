@@ -1,0 +1,25 @@
+<launch>
+    <node pkg="crawler_mapper" type="crawler_mapper" name="crawler_mapper" output="screen"> 
+    	<param name="x_offset" value="1" type="double"/>
+    	<param name="y_offset" value="1" type="double"/>
+    </node>
+
+    <node pkg="crawler_texture" type="crawler_texture" name="crawler_texture" output="screen"> </node>
+    <node pkg="octomap_server" type="octomap_server_node" name="octomap_server">
+        <param name="resolution" value="0.01" />        <!-- fixed map frame (set to 'map' if SLAM or localization running!) -->
+        <param name="frame_id" type="string" value="map" />        <!-- maximum range to integrate (speedup!) -->
+        <param name="sensor_model/max_range" value="50.0" />        <!-- data source to integrate (PointCloud2) -->
+        <remap from="cloud_in" to="/crawler_mapper/local_outlier_map" />  
+	<remap from="/occupied_cells_vis_array" to="/outliers_octomap" />    </node> 
+
+
+    <node pkg="octomap_server" type="octomap_server_node" name="octomap_server2">
+        <param name="resolution" value="0.01" />        <!-- fixed map frame (set to 'map' if SLAM or localization running!) -->
+        <param name="frame_id" type="string" value="map" />        <!-- maximum range to integrate (speedup!) -->
+        <param name="sensor_model/max_range" value="50.0" />        <!-- data source to integrate (PointCloud2) -->
+        <remap from="cloud_in" to="/crawler_mapper/local_inlier_map" />   
+	<remap from="/occupied_cells_vis_array" to="/inliers_octomap" />    </node>
+
+
+
+</launch>

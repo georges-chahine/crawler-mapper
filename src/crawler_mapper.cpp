@@ -117,9 +117,9 @@ protected:
     int erosion_elem = 0;
     int dilation_elem = 0;
 
-    int erosion_size = 2;
+    int erosion_size = 0;
 
-    int dilation_size =1;
+    int dilation_size =2;
 
     std::string icpParamPath;
     std::string icpInputParamPath;
@@ -133,7 +133,7 @@ protected:
     message_filters::Subscriber<nav_msgs::Odometry> odom_sub;
     message_filters::Subscriber<sensor_msgs::PointCloud2> pc_sub;
     pcl::PointCloud<pcl::PointXYZI>::Ptr globalMap, globalOutlierMap, globalMapFiltered;
-    typedef message_filters::sync_policies::ApproximateTime<sensor_msgs::Imu, nav_msgs::Odometry, sensor_msgs::PointCloud2> MySyncPolicy;
+    typedef message_filters::sync_policies::ApproximateTime<sensor_msgs::Imu, sensor_msgs::PointCloud2> MySyncPolicy;
     typedef message_filters::Synchronizer<MySyncPolicy> Sync;
     boost::shared_ptr<Sync> sync;
     tf::StampedTransform ifmTf, zeroTf;
@@ -196,7 +196,52 @@ protected:
         }
         return p;
     }
+    Eigen::Matrix4d getPoseTf(){
 
+
+        Eigen::Matrix4d pose=Eigen::Matrix4d::Identity();
+
+        try{
+
+
+            tf::StampedTransform tempTf;
+            listener1.waitForTransform("odom_ekf", "base_link", ros::Time(0), ros::Duration(1.0) );
+
+            listener1.lookupTransform("odom_ekf", "base_link", ros::Time(0), tempTf);
+
+            tf::Quaternion q=tempTf.getRotation();
+            tf::Vector3 t=tempTf.getOrigin();
+            pose(0,3)=t.x();
+            pose(1,3)=t.y();
+            pose(2,3)=t.z();
+
+            Eigen::Quaterniond qqq(q.w(),q.x(),q.y(),q.z());
+            Eigen::Matrix3d mmm(qqq);
+
+            pose.block(0,0,3,3)=mmm;
+            //pose=pose.inverse().eval();
+            // pose(0,3)=pose(0,3);
+            //pose(1,3)=pose(1,3);
+
+            std::cout<<"tf retrieved, ekf to base is \n" <<pose<<std::endl;
+
+
+        }
+
+
+
+        catch (tf::TransformException& ex)
+        {
+            ROS_ERROR("Received an exception trying to transform: %s", ex.what());
+        }
+
+        pose=zeroTransform*pose;
+
+        std::cout<<"tf retrieved, ekf to base is 2 \n" <<pose<<std::endl;
+
+        return pose;
+
+    }
     Eigen::Matrix4d getPose(const sensor_msgs::ImuConstPtr& imu, const nav_msgs::OdometryConstPtr& odom){
 
         double ax=imu->linear_acceleration.x;
@@ -339,6 +384,39 @@ protected:
 
     }
 
+    void in_out_liers(pcl::PointCloud<pcl::PointXYZI> p, std::vector<int>& outlierIndices, std::vector<int>& inlierIndices,float ransacDistTh ){
+
+
+        int counter=0;
+        for (int i=0; i<p.points.size(); i++){
+
+            float x1=p.points[i].x;
+            float y1=p.points[i].y;
+            float z1=p.points[i].z;
+            float distance=(std::abs(aa*x1+bb*y1+cc*z1+dd))/sqrt(aa*aa+bb*bb+cc*cc);
+            if (distance>ransacDistTh  &&  z1 > ((-dd-aa*x1-bb*y1)/cc)  ) {
+                outlierIndices.push_back(i);
+                counter++;
+
+
+            }
+            else
+            {
+
+                inlierIndices.push_back(i);
+
+            }
+
+        }
+
+        std::cout<<"points out of plane "<<counter<<" out of "<<p.points.size()<<" ("<<(100*counter)/p.points.size()<<"%)"<<std::endl;
+
+
+
+
+
+    }
+
     void ransac(pcl::PointCloud<pcl::PointXYZI> p, float cx, float cy,float ransacDistTh, std::vector<double>& planeParameters,  std::vector<int>& outlierIndices, std::vector<int>& inlierIndices, bool skip)
     {
 
@@ -399,9 +477,6 @@ protected:
                 A=A/sqrt(A*A+B*B+C*C);
                 B=B/sqrt(A*A+B*B+C*C);
                 C=C/sqrt(A*A+B*B+C*C);
-
-
-
 
                 float D=-A*p1x-B*p1y-C*p1z;
                 //A=A/D;
@@ -502,29 +577,9 @@ protected:
 
             // std::cout<<"plane equation is "<<aa<<"*x + "<<bb<<"*y + "<<cc<<"*z + "<<dd<<" = 0"<<std::endl;
 
-            int counter=0;
-            for (int i=0; i<p.points.size(); i++){
 
-                float x1=p.points[i].x;
-                float y1=p.points[i].y;
-                float z1=p.points[i].z;
-                float distance=(std::abs(aa*x1+bb*y1+cc*z1+dd))/sqrt(aa*aa+bb*bb+cc*cc);
-                if (distance>ransacDistTh  &&  z1 > ((-dd-aa*x1-bb*y1)/cc)  ) {
-                    outlierIndices.push_back(i);
-                    counter++;
+            in_out_liers(p,outlierIndices,inlierIndices, ransacDistTh);
 
-
-                }
-                else
-                {
-
-                    inlierIndices.push_back(i);
-
-                }
-
-            }
-
-            std::cout<<"points out of plane "<<counter<<" out of "<<p.points.size()<<" ("<<(100*counter)/p.points.size()<<"%)"<<std::endl;
         }
 
 
@@ -598,7 +653,7 @@ protected:
         double planeZ=(-planeParameters[0]*x-planeParameters[1]*y-planeParameters[3])/planeParameters[2];
 
         if (planeZ>z){
-             //   std::cout<<"plane z is "<<planeZ<<std::endl;
+            //   std::cout<<"plane z is "<<planeZ<<std::endl;
             p.z=planeZ; //collapse points below the plane onto the plane
         }
     }
@@ -758,7 +813,7 @@ protected:
 
             int v=int(  (cloudIn.points[i].x+ radius)  *(1/resolution));
             // u=w-u; //computer vision convention, x points to the right, y points down.
-            int u=int(  (cloudIn.points[i].y+ radius)  *(1/resolution));
+            int u=int(  (-cloudIn.points[i].y+ radius)  *(1/resolution));
 
             if (depthFrame(u,v)==0.0){
 
@@ -973,17 +1028,18 @@ protected:
                         tf::Transform(qCam1, tf::Vector3(tempMat(0,3),tempMat(1,3),tempMat(2,3) )),
                         time,"odom_ekf", "map"));
     }
-    void mapCb(const sensor_msgs::ImuConstPtr& imu, const nav_msgs::OdometryConstPtr& odom, const sensor_msgs::PointCloud2ConstPtr& ifm)
+    void mapCb(const sensor_msgs::ImuConstPtr& imu, const sensor_msgs::PointCloud2ConstPtr& ifm)
     {
-        if (init==false && useTf)
+        if (init==false)
         {
             initFn(ifm->header.frame_id);
+            init=true;
 
         }
         updateTf(ifm->header.stamp);
 
-        double insideTh=0.1;  //bounding box sphere, delete inside
-        double outsideTh=1;   //bounding box sphere, delete outside
+        double insideTh=0.3;  //bounding box sphere, delete inside
+        double outsideTh=2;   //bounding box sphere, delete outside
         float radius=2;  //local map radius
         float ransac_threshold=0.01;
 
@@ -992,7 +1048,7 @@ protected:
         pcl_conversions::toPCL(*ifm,*pc2);
         pcl::VoxelGrid<pcl::PCLPointCloud2> sor;
         sor.setInputCloud (pc2);
-        sor.setMinimumPointsNumberPerVoxel(2);
+        sor.setMinimumPointsNumberPerVoxel(3);
         sor.setLeafSize (leaf_size,leaf_size,leaf_size);
         sor.filter (*pc2);
 
@@ -1001,15 +1057,31 @@ protected:
         pcl::fromPCLPointCloud2(*pc2,*temp_cloud);
         pcl::removeNaNFromPointCloud(*temp_cloud, *temp_cloud, indices);
 
-        Eigen::Matrix4d pose=getPose(imu, odom);
 
+
+        pcl::StatisticalOutlierRemoval<pcl::PointXYZI> statFilter;
+        statFilter.setInputCloud (temp_cloud);
+        statFilter.setMeanK (10);
+        statFilter.setStddevMulThresh (1);
+        statFilter.filter (*temp_cloud);
+
+
+
+
+        //Eigen::Matrix4d pose=getPose(imu, odom);
+        Eigen::Matrix4d pose=getPoseTf();
         pcl::PointCloud<pcl::PointXYZI>::Ptr cloudIn (new pcl::PointCloud<pcl::PointXYZI>);
+        pcl::PointCloud<pcl::PointXYZI>::Ptr cloudInTransformed (new pcl::PointCloud<pcl::PointXYZI>);
 
         *cloudIn= boundingBox(temp_cloud, insideTh, outsideTh);
+        *cloudInTransformed=*cloudIn;
 
         pcl::PointCloud<pcl::PointXYZI>::Ptr localMap (new pcl::PointCloud<pcl::PointXYZI>);
         pcl::PointCloud<pcl::PointXYZI>::Ptr localOutlierMap (new pcl::PointCloud<pcl::PointXYZI>);
         pcl::PointCloud<pcl::PointXYZI>::Ptr localInlierMap (new pcl::PointCloud<pcl::PointXYZI>);
+
+        pcl::PointCloud<pcl::PointXYZI>::Ptr localOutlierMapFull (new pcl::PointCloud<pcl::PointXYZI>);
+        pcl::PointCloud<pcl::PointXYZI>::Ptr localInlierMapFull (new pcl::PointCloud<pcl::PointXYZI>);
 
         std::vector<double> planeDefNormal{0,0,1};
 
@@ -1018,14 +1090,17 @@ protected:
 
         std::vector<double> planeDefault{planeDefNormal[0],planeDefNormal[1],planeDefNormal[2],d};
 
-        transform_cloud(*cloudIn, pose*ifmTransform);
-        //transform_cloud(*cloudIn, ifmTransform);
+
+
+        transform_cloud(*cloudInTransformed, pose*ifmTransform);
+        transform_cloud(*cloudIn, ifmTransform);
+        collapsePoints(*cloudInTransformed, planeDefault);
         collapsePoints(*cloudIn, planeDefault);
 
 
         //  globalMap->points.push_back(p);
 
-        if (doIcp && cloudIn->points.size()>500){
+        if (doIcp && cloudInTransformed->points.size()>500){
             using namespace PointMatcherSupport;
 
             pcl::NormalEstimationOMP<pcl::PointXYZI, pcl::Normal> ne;
@@ -1126,7 +1201,7 @@ protected:
         }
 
 
-        *globalMap += *cloudIn;
+        *globalMap += *cloudInTransformed;
 
         globalMap->header.frame_id = "map";
 
@@ -1150,7 +1225,14 @@ protected:
         std::vector<double> planeParameters{0,0,0,0};
         std::vector<int> outliers, inliers;
 
-        ransac(*localMap, pose(0,3), pose(1,3), ransac_threshold, planeParameters, outliers, inliers, skipRansac);
+
+        ransac(*localMap, pose(0,3), pose(1,3), ransac_threshold, planeParameters, outliers, inliers, skipRansac); //important, even if ransac is disabled the plane equation is set here (manually).
+
+        std::vector<int> newOutliers, newInliers;
+
+        in_out_liers(*cloudIn,newOutliers,newInliers, ransac_threshold);
+
+
 
         double p1=planeParameters[0];
         double p2=planeParameters[1];
@@ -1158,29 +1240,47 @@ protected:
         double p4=planeParameters[3];
         std::cout<<"plane equation is "<<p1<<"*x + "<<p2<<"*y + "<<p3<<"*z + "<<p4<<" = 0"<<std::endl;
 
+        for (int k=0; k<newOutliers.size(); k++){
+
+            {
+                localOutlierMap->points.push_back(cloudIn->points[newOutliers[k]]);
+            }
+        }
+
+        for (int k=0; k<newInliers.size(); k++){
+
+            {
+                localInlierMap->points.push_back(cloudIn->points[newInliers[k]]);
+
+
+            }
+        }
+
         for (int k=0; k<outliers.size(); k++){
 
             {
-                localOutlierMap->points.push_back(localMap->points[outliers[k]]);
+                localOutlierMapFull->points.push_back(localMap->points[outliers[k]]);
             }
         }
 
         for (int k=0; k<inliers.size(); k++){
 
             {
-                localInlierMap->points.push_back(localMap->points[inliers[k]]);
+                localInlierMapFull->points.push_back(localMap->points[inliers[k]]);
 
 
             }
         }
 
+
+
         // *globalOutlierMap += *localOutlierMap;
         //localOutlierMap->header=ifm->header;
 
-        cv::Mat_<float> localImg = publishObstacleLayer(*localOutlierMap, pose(0,3), pose(1,3), ifm->header.stamp, radius, leaf_size);
+        cv::Mat_<float> localImg = publishObstacleLayer(*localOutlierMapFull, pose(0,3), pose(1,3), ifm->header.stamp, radius, leaf_size);
 
 
-        updateOccupancy(*localOutlierMap, ifm->header, pose(0,3),pose(1,3),outsideTh, leaf_size);
+        updateOccupancy(*localOutlierMapFull, ifm->header, pose(0,3),pose(1,3),outsideTh, leaf_size);
 
 
 
@@ -1260,19 +1360,20 @@ protected:
 public:
     Mapper() : n("~"), it(n) {
 
+        n.param<double>("x_offset", xOffset, 1);
+        n.param<double>("y_offset", yOffset, 1);
 
-
-        xOffset=1.5;
-        yOffset=1;
+        //xOffset=1;
+        //yOffset=1;
         icpParamPath="/home/gchahine/catkin_ws/src/crawler_mapper/icpConfig/icp_param.yaml";
         icpInputParamPath="/home/gchahine/catkin_ws/src/crawler_mapper/icpConfig/input_filters.yaml";
         icpPostParamPath="/home/gchahine/catkin_ws/src/crawler_mapper/icpConfig/mapPost_filters.yaml";
         computeProbDynamic=true;
         doIcp=false;
-        useTf=true;
+        useTf=false;
         skipRansac=true;
         gx=gy=gz=gxx=gyy=gzz=aa=bb=cc=dd=x=y=n1=n2=n3=0;
-        leaf_size=0.025;
+        leaf_size=0.01;
 
 
         q0 = tf::createQuaternionFromRPY(0, 0.33, 0);
@@ -1298,7 +1399,7 @@ public:
         n.param("transport",transport,transport);
 
         imu_sub.subscribe(n, "/imu/imu", 1);
-        odom_sub.subscribe(n, "/odom_ekf", 1);
+        //odom_sub.subscribe(n, "/odom_ekf", 1);
         pc_sub.subscribe(n, "/ifm3d_filter/cloud_out", 1);
 
         localOutlierPub = n.advertise<pcl::PointCloud<pcl::PointXYZI> > ("local_outlier_map", 1);
@@ -1316,9 +1417,9 @@ public:
 
 
         ransacPlanePub = n.advertise<pcl::PointCloud<pcl::PointXYZ> > ("ransac_plane", 1);
-        sync.reset(new Sync(MySyncPolicy(10), imu_sub, odom_sub, pc_sub));
+        sync.reset(new Sync(MySyncPolicy(10), imu_sub, pc_sub));
 
-        sync->registerCallback(boost::bind(&Mapper::mapCb, this, _1, _2, _3));
+        sync->registerCallback(boost::bind(&Mapper::mapCb, this, _1, _2));
 
 
     }
